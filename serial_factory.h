@@ -1,5 +1,5 @@
-#ifndef SERIAL_GENERATOR_SERIAL_GENERATOR_H
-#define SERIAL_GENERATOR_SERIAL_GENERATOR_H
+#ifndef SERIAL_FACTORY_SERIAL_FACTORY_H
+#define SERIAL_FACTORY_SERIAL_FACTORY_H
 
 #include <cstddef>
 #include <cstdint>
@@ -10,7 +10,7 @@
 
 #define SERIAL_MESSAGE __attribute__((packed))
 
-namespace serial_generator
+namespace serial_factory
 {
 
 namespace internal
@@ -145,7 +145,7 @@ namespace internal
 
 
 template <typename... Ts>
-class SerialGenerator
+class SerialFactory
 {
 private:
   template <typename TargetType, typename ReturnType>
@@ -289,6 +289,6 @@ private:
   GenericMessage buffer;
 };
 
-} // namespace serial_generator
+} // namespace serial_factory
 
-#endif // SERIAL_GENERATOR_SERIAL_GENERATOR_H
+#endif // SERIAL_FACTORY_SERIAL_FACTORY_H
