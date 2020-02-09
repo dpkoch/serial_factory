@@ -36,14 +36,12 @@ namespace internal
   using IfNotSameType = std::enable_if_t<!std::is_same<T1, T2>::value, ReturnType>;
 
   template <typename Target, size_t index, typename Current, typename... Tail>
-  // static constexpr std::enable_if_t<std::is_same<Target, Current>::value, size_t> get_index()
   static constexpr IfSameType<Target, Current> get_index()
   {
     return index;
   }
 
   template <typename Target, size_t index, typename Current, typename... Tail>
-  // static constexpr std::enable_if_t<!std::is_same<Target, Current>::value, size_t> get_index()
   static constexpr IfNotSameType<Target, Current> get_index()
   {
     return get_index<Target, index + 1, Tail...>();
@@ -114,36 +112,6 @@ namespace internal
 } // namespace internal
 
 
-
-
-
-// //! @note Variadic union structure:
-// struct FirstMessage {};
-// struct SecondMessage {};
-// struct ThirdMessage {};
-// union X
-// {
-//   uint8_t buffer[20];
-//   // VariadicUnion<Ts...> msgs;
-//   union
-//   {
-//     FirstMessage msg;
-//     union
-//     {
-//       SecondMessage msg;
-//       union
-//       {
-//         ThirdMessage msg;
-//       } tail;
-//     } tail;
-//   } tail;
-// };
-// then do something like `T msg = X.msgs.get<T>()`;
-
-
-
-
-
 template <typename... Ts>
 class SerialFactory
 {
@@ -180,7 +148,6 @@ public:
   }
 
   template <typename T>
-  // static std::enable_if_t<internal::is_in_list<T, Ts...>(), size_t> send_to_buffer(uint8_t *dst, const T &msg)
   static IfSupportedType<T, size_t> send_to_buffer(uint8_t *dst, const T &msg)
   {
     dst[0] = START_BYTE;
@@ -194,20 +161,8 @@ public:
   }
 
   template <typename T>
-  // static std::enable_if_t<internal::is_in_list<T, Ts...>(), T> unpack(const GenericMessage &msg)
   static IfSupportedType<T, T> unpack(const GenericMessage &msg)
   {
-    // union
-    // {
-    //   uint8_t (*buffer)[MAX_PAYLOAD_SIZE];
-    //   T data;
-    // } converter;
-
-    // converter.buffer = msg.payload;
-    // return converter.data;
-
-    // return *reinterpret_cast<T*>(msg.payload);
-
     return msg.payload.template get<T>();
   }
 
@@ -256,7 +211,6 @@ public:
       // if (true)
       {
         got_message = true;
-        // msg = buffer; //! @todo should this be a memcpy?
         std::memcpy(reinterpret_cast<void*>(&msg), reinterpret_cast<const void*>(&buffer), sizeof(msg));
       }
       parse_state = ParseState::IDLE;
