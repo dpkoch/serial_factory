@@ -8,129 +8,42 @@
 #include <limits>
 #include <type_traits>
 
+#include "internal/sfinae_helpers.h"
+#include "internal/variadic_union.h"
+
 #define SERIAL_MESSAGE __attribute__((packed))
 
 namespace serial_factory
 {
-
-namespace internal
-{
-  // get max size of a list of types
-  template <typename T>
-  static constexpr size_t max_sizeof()
-  {
-    return sizeof(T);
-  }
-
-  template <typename T1, typename T2, typename... Ts>
-  static constexpr size_t max_sizeof()
-  {
-    return sizeof(T1) > max_sizeof<T2, Ts...>() ? sizeof(T1) : max_sizeof<T2, Ts...>();
-  }
-
-  // get index of type in the list
-  template <typename T1, typename T2, typename ReturnType = size_t>
-  using IfSameType = std::enable_if_t<std::is_same<T1, T2>::value, ReturnType>;
-
-  template <typename T1, typename T2, typename ReturnType = size_t>
-  using IfNotSameType = std::enable_if_t<!std::is_same<T1, T2>::value, ReturnType>;
-
-  template <typename Target, size_t index, typename Current, typename... Tail>
-  static constexpr IfSameType<Target, Current> get_index()
-  {
-    return index;
-  }
-
-  template <typename Target, size_t index, typename Current, typename... Tail>
-  static constexpr IfNotSameType<Target, Current> get_index()
-  {
-    return get_index<Target, index + 1, Tail...>();
-  }
-
-  // check whether type is in a list of types
-  template <typename Target>
-  static constexpr bool is_in_list()
-  {
-    return false;
-  }
-
-  template <typename Target, typename Current, typename... Tail>
-  static constexpr std::enable_if_t<std::is_same<Target, Current>::value, bool> is_in_list()
-  {
-    return true;
-  }
-
-  template <typename Target, typename Current, typename... Tail>
-  static constexpr std::enable_if_t<!std::is_same<Target, Current>::value, bool> is_in_list()
-  {
-    return is_in_list<Target, Tail...>();
-  }
-
-
-
-  template <typename... Ts>
-  union VariadicUnion {};
-
-  template <typename T, typename... Ts>
-  union VariadicUnion<T, Ts...> {
-    T head;
-    VariadicUnion<Ts...> tail;
-  };
-
-  template <typename... Ts>
-  struct PayloadBuffer
-  {
-    union
-    {
-      uint8_t buffer[max_sizeof<Ts...>()];
-      VariadicUnion<Ts...> msgs;
-    } payload;
-
-  private:
-    template <typename TargetType, typename ReturnType>
-    using IfSupportedType = typename std::enable_if_t<is_in_list<TargetType, Ts...>(), ReturnType>;
-
-    template <typename Target, typename Head, typename... Tail>
-    IfSameType<Target, Head, Target> get_msg(const VariadicUnion<Head, Tail...> &current) const
-    {
-      return current.head;
-    }
-
-    template <typename Target, typename Head, typename... Tail>
-    IfNotSameType<Target, Head, Target> get_msg(const VariadicUnion<Head, Tail...> &current) const
-    {
-      return get_msg<Target, Tail...>(current.tail);
-    }
-
-  public:
-    template <typename T>
-    IfSupportedType<T, T> get() const
-    {
-      return get_msg<T, Ts...>(payload.msgs);
-    }
-  };
-} // namespace internal
-
 
 template <typename... Ts>
 class SerialFactory
 {
 private:
   template <typename TargetType, typename ReturnType>
-  using IfSupportedType = typename std::enable_if_t<internal::is_in_list<TargetType, Ts...>(), ReturnType>;
+  using IfSupportedType = typename internal::IfIsTypeInList<TargetType, ReturnType, Ts...>;
 
 public:
 
-  static constexpr size_t MAX_PAYLOAD_SIZE = internal::max_sizeof<Ts...>();
+  static constexpr size_t MAX_PAYLOAD_SIZE = internal::maxSizeOf<Ts...>();
 
   struct __attribute__((packed)) GenericMessage
   {
     const uint8_t start_byte = START_BYTE;
     uint8_t id;
     uint8_t payload_size;
-    // uint8_t payload[MAX_PAYLOAD_SIZE];
-    internal::PayloadBuffer<Ts...> payload;
+    union
+    {
+      uint8_t buffer[MAX_PAYLOAD_SIZE];
+      internal::VariadicUnion<Ts...> msgs;
+    } payload;
     uint16_t checksum;
+
+    template <typename T>
+    IfSupportedType<T, T> unpack()
+    {
+      return payload.msgs.template get<T>();
+    }
   };
 
   static_assert(sizeof...(Ts) <= std::numeric_limits<decltype(GenericMessage::id)>::max()+1,
@@ -144,7 +57,7 @@ public:
   template <typename Target>
   static constexpr size_t id()
   {
-    return internal::get_index<Target, 0, Ts...>();
+    return internal::indexOfTypeInList<Target, Ts...>();
   }
 
   template <typename T>
@@ -160,12 +73,6 @@ public:
     dst[4+sizeof(msg)] = 0; //! @todo actual checksum
   }
 
-  template <typename T>
-  static IfSupportedType<T, T> unpack(const GenericMessage &msg)
-  {
-    return msg.payload.template get<T>();
-  }
-
   bool parse_byte(uint8_t byte, GenericMessage &msg)
   {
     bool got_message = false;
@@ -179,12 +86,12 @@ public:
       }
       break;
     case ParseState::GOT_START_BYTE:
-      buffer.id = byte;
+      msg_buffer.id = byte;
       parse_state = ParseState::GOT_ID;
       break;
     case ParseState::GOT_ID:
-      buffer.payload_size = byte;
-      if (buffer.payload_size > 0)
+      msg_buffer.payload_size = byte;
+      if (msg_buffer.payload_size > 0)
       {
         parse_state = ParseState::GOT_LENGTH;
         payload_bytes_received = 0;
@@ -195,8 +102,8 @@ public:
       }
       break;
     case ParseState::GOT_LENGTH:
-      buffer.payload.payload.buffer[payload_bytes_received++] = byte;
-      if (payload_bytes_received >= buffer.payload_size)
+      msg_buffer.payload.buffer[payload_bytes_received++] = byte;
+      if (payload_bytes_received >= msg_buffer.payload_size)
       {
         parse_state = ParseState::GOT_PAYLOAD;
       }
@@ -207,11 +114,10 @@ public:
       break;
     case ParseState::GOT_CHECKSUM_1:
       checksum = 0; //! @todo Actual checksum
-      if (checksum == compute_checksum(reinterpret_cast<const uint8_t*>(&buffer), 3 + buffer.payload_size))
-      // if (true)
+      if (checksum == compute_checksum(reinterpret_cast<const uint8_t*>(&msg_buffer), 3 + msg_buffer.payload_size))
       {
         got_message = true;
-        std::memcpy(reinterpret_cast<void*>(&msg), reinterpret_cast<const void*>(&buffer), sizeof(msg));
+        std::memcpy(reinterpret_cast<void*>(&msg), reinterpret_cast<const void*>(&msg_buffer), sizeof(msg));
       }
       parse_state = ParseState::IDLE;
     }
@@ -240,7 +146,7 @@ private:
   ParseState parse_state = ParseState::IDLE;
   size_t payload_bytes_received = 0;
   uint16_t checksum;
-  GenericMessage buffer;
+  GenericMessage msg_buffer;
 };
 
 } // namespace serial_factory
