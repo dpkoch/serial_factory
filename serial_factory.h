@@ -8,6 +8,7 @@
 #include <limits>
 #include <type_traits>
 
+#include "internal/checksum.h"
 #include "internal/sfinae_helpers.h"
 #include "internal/variadic_union.h"
 
@@ -26,6 +27,16 @@ private:
 public:
 
   static constexpr size_t MAX_PAYLOAD_SIZE = internal::maxSizeOf<Ts...>();
+
+  // union Checksum
+  // {
+  //   struct __attribute__((packed))
+  //   {
+  //     uint8_t c1;
+  //     uint8_t c2;
+  //   };
+  //   uint16_t checksum;
+  // };
 
   struct __attribute__((packed)) GenericMessage
   {
