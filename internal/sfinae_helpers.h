@@ -11,13 +11,13 @@ namespace internal
 
 // get max size of a list of types
 template <typename T>
-static constexpr size_t maxSizeOf()
+constexpr size_t maxSizeOf()
 {
   return sizeof(T);
 }
 
 template <typename T1, typename T2, typename... Ts>
-static constexpr size_t maxSizeOf()
+constexpr size_t maxSizeOf()
 {
   return sizeof(T1) > maxSizeOf<T2, Ts...>() ? sizeof(T1) : maxSizeOf<T2, Ts...>();
 }
@@ -33,20 +33,20 @@ using IfNotSameType = std::enable_if_t<!std::is_same<T1, T2>::value, ReturnType>
 namespace implementation
 {
   template <typename Target, size_t index, typename Current, typename... Tail>
-  static constexpr IfSameType<Target, Current, size_t> indexOfTypeInList()
+  constexpr IfSameType<Target, Current, size_t> indexOfTypeInList()
   {
     return index;
   }
 
   template <typename Target, size_t index, typename Current, typename... Tail>
-  static constexpr IfNotSameType<Target, Current, size_t> indexOfTypeInList()
+  constexpr IfNotSameType<Target, Current, size_t> indexOfTypeInList()
   {
     return indexOfTypeInList<Target, index + 1, Tail...>();
   }
 } // namespace implementation
 
 template <typename Target, typename... TypeList>
-static constexpr size_t indexOfTypeInList()
+constexpr size_t indexOfTypeInList()
 {
   return implementation::indexOfTypeInList<Target, 0, TypeList...>();
 }
@@ -55,19 +55,19 @@ static constexpr size_t indexOfTypeInList()
 namespace implementation
 {
   template <typename Target>
-  static constexpr bool is_in_list()
+  constexpr bool is_in_list()
   {
     return false;
   }
 
   template <typename Target, typename Current, typename... Tail>
-  static constexpr IfSameType<Target, Current, bool> is_in_list()
+  constexpr IfSameType<Target, Current, bool> is_in_list()
   {
     return true;
   }
 
   template <typename Target, typename Current, typename... Tail>
-  static constexpr IfNotSameType<Target, Current, bool> is_in_list()
+  constexpr IfNotSameType<Target, Current, bool> is_in_list()
   {
     return is_in_list<Target, Tail...>();
   }
