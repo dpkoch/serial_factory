@@ -24,8 +24,9 @@ private:
   template <typename TargetType, typename ReturnType>
   using IfSupportedType = typename internal::IfIsTypeInList<TargetType, ReturnType, Ts...>;
 
-public:
+  static constexpr uint8_t START_BYTE = 0xBD;
 
+public:
   static constexpr size_t MAX_PAYLOAD_SIZE = internal::maxSizeOf<Ts...>();
 
   struct __attribute__((packed)) GenericMessage
@@ -38,7 +39,7 @@ public:
       uint8_t buffer[MAX_PAYLOAD_SIZE];
       internal::VariadicUnion<Ts...> msgs;
     } payload;
-    checksum_t checksum;
+    checksum_t checksum = 0;
 
     template <typename T>
     IfSupportedType<T, T> unpack()
@@ -71,73 +72,75 @@ public:
     dst[3+sizeof(msg)] = internal::compute_checksum(dst, 3+sizeof(msg));
   }
 
-  bool parse_byte(uint8_t byte, GenericMessage &msg)
+  class Parser
   {
-    bool got_message = false;
-
-    switch (parse_state)
+  public:
+    bool parse_byte(uint8_t byte, GenericMessage &msg)
     {
-    case ParseState::IDLE:
-      if (byte == START_BYTE)
+      bool got_message = false;
+
+      switch (parse_state)
       {
+      case ParseState::IDLE:
+        if (byte == START_BYTE)
+        {
+          msg_buffer.checksum = internal::update_checksum(msg_buffer.checksum, byte);
+          parse_state = ParseState::GOT_START_BYTE;
+        }
+        break;
+      case ParseState::GOT_START_BYTE:
+        msg_buffer.id = byte;
         msg_buffer.checksum = internal::update_checksum(msg_buffer.checksum, byte);
-        parse_state = ParseState::GOT_START_BYTE;
+        parse_state = ParseState::GOT_ID;
+        break;
+      case ParseState::GOT_ID:
+        msg_buffer.payload_size = byte;
+        msg_buffer.checksum = internal::update_checksum(msg_buffer.checksum, byte);
+        if (msg_buffer.payload_size > 0)
+        {
+          parse_state = ParseState::GOT_LENGTH;
+          payload_bytes_received = 0;
+        }
+        else
+        {
+          parse_state = ParseState::GOT_PAYLOAD;
+        }
+        break;
+      case ParseState::GOT_LENGTH:
+        msg_buffer.payload.buffer[payload_bytes_received++] = byte;
+        msg_buffer.checksum = internal::update_checksum(msg_buffer.checksum, byte);
+        if (payload_bytes_received >= msg_buffer.payload_size)
+        {
+          parse_state = ParseState::GOT_PAYLOAD;
+        }
+        break;
+      case ParseState::GOT_PAYLOAD:
+        if (byte == msg_buffer.checksum)
+        {
+          got_message = true;
+          std::memcpy(reinterpret_cast<void *>(&msg), reinterpret_cast<const void *>(&msg_buffer), sizeof(msg));
+        }
+        msg_buffer.checksum = 0;
+        parse_state = ParseState::IDLE;
       }
-      break;
-    case ParseState::GOT_START_BYTE:
-      msg_buffer.id = byte;
-      msg_buffer.checksum = internal::update_checksum(msg_buffer.checksum, byte);
-      parse_state = ParseState::GOT_ID;
-      break;
-    case ParseState::GOT_ID:
-      msg_buffer.payload_size = byte;
-      msg_buffer.checksum = internal::update_checksum(msg_buffer.checksum, byte);
-      if (msg_buffer.payload_size > 0)
-      {
-        parse_state = ParseState::GOT_LENGTH;
-        payload_bytes_received = 0;
-      }
-      else
-      {
-        parse_state = ParseState::GOT_PAYLOAD;
-      }
-      break;
-    case ParseState::GOT_LENGTH:
-      msg_buffer.payload.buffer[payload_bytes_received++] = byte;
-      msg_buffer.checksum = internal::update_checksum(msg_buffer.checksum, byte);
-      if (payload_bytes_received >= msg_buffer.payload_size)
-      {
-        parse_state = ParseState::GOT_PAYLOAD;
-      }
-      break;
-    case ParseState::GOT_PAYLOAD:
-      if (byte == msg_buffer.checksum)
-      {
-        got_message = true;
-        std::memcpy(reinterpret_cast<void*>(&msg), reinterpret_cast<const void*>(&msg_buffer), sizeof(msg));
-      }
-      msg_buffer.checksum = 0;
-      parse_state = ParseState::IDLE;
+
+      return got_message;
     }
 
-    return got_message;
-  }
+  private:
+    enum class ParseState
+    {
+      IDLE,
+      GOT_START_BYTE,
+      GOT_ID,
+      GOT_LENGTH,
+      GOT_PAYLOAD
+    };
 
-private:
-  static constexpr uint8_t START_BYTE = 0xBD;
-
-  enum class ParseState
-  {
-    IDLE,
-    GOT_START_BYTE,
-    GOT_ID,
-    GOT_LENGTH,
-    GOT_PAYLOAD
+    ParseState parse_state = ParseState::IDLE;
+    size_t payload_bytes_received = 0;
+    GenericMessage msg_buffer;
   };
-
-  ParseState parse_state = ParseState::IDLE;
-  size_t payload_bytes_received = 0;
-  GenericMessage msg_buffer;
 };
 
 } // namespace serial_factory
