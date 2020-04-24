@@ -8,6 +8,7 @@
 #include <limits>
 #include <type_traits>
 
+#include "internal/checksum.h"
 #include "internal/sfinae_helpers.h"
 #include "internal/variadic_union.h"
 
@@ -37,7 +38,7 @@ public:
       uint8_t buffer[MAX_PAYLOAD_SIZE];
       internal::VariadicUnion<Ts...> msgs;
     } payload;
-    uint16_t checksum;
+    checksum_t checksum;
 
     template <typename T>
     IfSupportedType<T, T> unpack()
@@ -67,10 +68,7 @@ public:
     dst[1] = id<T>();
     dst[2] = sizeof(msg);
     std::memcpy(reinterpret_cast<void*>(dst+3), reinterpret_cast<const void*>(&msg), sizeof(msg));
-
-    uint16_t checksum = compute_checksum(dst, 3+sizeof(msg));
-    dst[3+sizeof(msg)] = 0; //! @todo actual checksum
-    dst[4+sizeof(msg)] = 0; //! @todo actual checksum
+    dst[3+sizeof(msg)] = internal::compute_checksum(dst, 3+sizeof(msg));
   }
 
   bool parse_byte(uint8_t byte, GenericMessage &msg)
@@ -82,15 +80,18 @@ public:
     case ParseState::IDLE:
       if (byte == START_BYTE)
       {
+        msg_buffer.checksum = internal::update_checksum(msg_buffer.checksum, byte);
         parse_state = ParseState::GOT_START_BYTE;
       }
       break;
     case ParseState::GOT_START_BYTE:
       msg_buffer.id = byte;
+      msg_buffer.checksum = internal::update_checksum(msg_buffer.checksum, byte);
       parse_state = ParseState::GOT_ID;
       break;
     case ParseState::GOT_ID:
       msg_buffer.payload_size = byte;
+      msg_buffer.checksum = internal::update_checksum(msg_buffer.checksum, byte);
       if (msg_buffer.payload_size > 0)
       {
         parse_state = ParseState::GOT_LENGTH;
@@ -103,22 +104,19 @@ public:
       break;
     case ParseState::GOT_LENGTH:
       msg_buffer.payload.buffer[payload_bytes_received++] = byte;
+      msg_buffer.checksum = internal::update_checksum(msg_buffer.checksum, byte);
       if (payload_bytes_received >= msg_buffer.payload_size)
       {
         parse_state = ParseState::GOT_PAYLOAD;
       }
       break;
     case ParseState::GOT_PAYLOAD:
-      checksum = 0; //! @todo Actual checksum
-      parse_state = ParseState::GOT_CHECKSUM_1;
-      break;
-    case ParseState::GOT_CHECKSUM_1:
-      checksum = 0; //! @todo Actual checksum
-      if (checksum == compute_checksum(reinterpret_cast<const uint8_t*>(&msg_buffer), 3 + msg_buffer.payload_size))
+      if (byte == msg_buffer.checksum)
       {
         got_message = true;
         std::memcpy(reinterpret_cast<void*>(&msg), reinterpret_cast<const void*>(&msg_buffer), sizeof(msg));
       }
+      msg_buffer.checksum = 0;
       parse_state = ParseState::IDLE;
     }
 
@@ -134,18 +132,11 @@ private:
     GOT_START_BYTE,
     GOT_ID,
     GOT_LENGTH,
-    GOT_PAYLOAD,
-    GOT_CHECKSUM_1
+    GOT_PAYLOAD
   };
-
-  static uint16_t compute_checksum(const uint8_t *src, size_t len)
-  {
-    return 0;
-  }
 
   ParseState parse_state = ParseState::IDLE;
   size_t payload_bytes_received = 0;
-  uint16_t checksum;
   GenericMessage msg_buffer;
 };
 
